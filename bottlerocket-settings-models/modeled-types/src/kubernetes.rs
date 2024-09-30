@@ -1,6 +1,7 @@
 use super::error;
 use bottlerocket_scalar_derive::Scalar;
 use bottlerocket_string_impls_for::string_impls_for;
+use bounded_integer::BoundedI32;
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -19,6 +20,10 @@ use crate::SingleLineString;
 // Declare constant values usable by any type
 const IMAGE_GC_THRESHOLD_MAX: i32 = 100;
 const IMAGE_GC_THRESHOLD_MIN: i32 = 0;
+
+// Define the bounds for the `time-slicing.replicas` field
+const TIME_SLICING_REPLICAS_MIN: i32 = 2;
+const TIME_SLICING_REPLICAS_MAX: i32 = i32::MAX;
 
 /// KubernetesName represents a string that contains a valid Kubernetes resource name.  It stores
 /// the original string and makes it accessible through standard traits.
@@ -1452,6 +1457,8 @@ pub struct NvidiaDevicePluginSettings {
     pass_device_specs: bool,
     device_id_strategy: NvidiaDeviceIdStrategy,
     device_list_strategy: NvidiaDeviceListStrategy,
+    device_sharing_strategy: NvidiaDeviceSharingStrategy,
+    time_slicing: NvidiaTimeSlicingSettings,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
@@ -1466,6 +1473,20 @@ pub enum NvidiaDeviceIdStrategy {
 pub enum NvidiaDeviceListStrategy {
     Envvar,
     VolumeMounts,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum NvidiaDeviceSharingStrategy {
+    None,
+    TimeSlicing,
+}
+
+#[model(impl_default = true)]
+pub struct NvidiaTimeSlicingSettings {
+    replicas: BoundedI32<TIME_SLICING_REPLICAS_MIN, TIME_SLICING_REPLICAS_MAX>,
+    rename_by_default: bool,
+    fail_requests_greater_than_one: bool,
 }
 
 #[cfg(test)]
@@ -1483,10 +1504,38 @@ mod tests {
                 pass_device_specs: Some(false),
                 device_id_strategy: Some(NvidiaDeviceIdStrategy::Uuid),
                 device_list_strategy: Some(NvidiaDeviceListStrategy::Envvar),
+                device_sharing_strategy: None,
+                time_slicing: None
+            }
+        );
+        let results = serde_json::to_string(&nvidia_device_plugins).unwrap();
+        assert_eq!(results, test_json);
+    }
+
+    #[test]
+    fn test_serde_nvidia_device_plugins_with_time_slicing() {
+        let test_json = r#"{"pass-device-specs":false,"device-id-strategy":"uuid","device-list-strategy":"envvar","device-sharing-strategy":"time-slicing"}"#;
+        let nvidia_device_plugins: NvidiaDevicePluginSettings =
+            serde_json::from_str(test_json).unwrap();
+        assert_eq!(
+            nvidia_device_plugins,
+            NvidiaDevicePluginSettings {
+                pass_device_specs: Some(false),
+                device_id_strategy: Some(NvidiaDeviceIdStrategy::Uuid),
+                device_list_strategy: Some(NvidiaDeviceListStrategy::Envvar),
+                device_sharing_strategy: Some(NvidiaDeviceSharingStrategy::TimeSlicing),
+                time_slicing: None
             }
         );
 
         let results = serde_json::to_string(&nvidia_device_plugins).unwrap();
         assert_eq!(results, test_json);
+    }
+
+    #[test]
+    fn test_invalid_time_slicing_replicas() {
+        let test_json = r#"{"pass-device-specs":false,"device-id-strategy":"uuid","device-list-strategy":"envvar","device-sharing-strategy":"time-slicing","time-slicing":{"replicas":0}}"#;
+        let result: Result<NvidiaDevicePluginSettings, _> = serde_json::from_str(test_json);
+        assert!(result.is_err(), "The JSON should not be parsed successfully as it contains an invalid value for 'replicas'.");
     }
 }
