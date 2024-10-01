@@ -9,7 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - See [unreleased changes here]
 
-[unreleased changes here]: https://github.com/bottlerocket-os/bottlerocket-settings-sdk/compare/bottlerocket-settings-models-v0.5.0...HEAD
+[unreleased changes here]: https://github.com/bottlerocket-os/bottlerocket-settings-sdk/compare/bottlerocket-settings-models-v0.6.0...HEAD
+
+## [0.6.0] - 2024-10-02
+
+## Model Changes
+
+### Added
+
+- Added nvidia time-slicing to kubernetes device plugins settings extension ([#62])
+
+[#62]: https://github.com/bottlerocket-os/bottlerocket-settings-sdk/pull/62
+
+[0.6.0]: https://github.com/bottlerocket-os/bottlerocket-settings-sdk/compare/bottlerocket-settings-models-v0.6.0...bottlerocket-settings-models-v0.5.0
 
 ## [0.5.0] - 2024-09-10
 
