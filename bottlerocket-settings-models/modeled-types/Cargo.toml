@@ -1,6 +1,6 @@
 [package]
 name = "bottlerocket-modeled-types"
-version = "0.5.0"
+version = "0.6.0"
 authors = []
 license = "Apache-2.0 OR MIT"
 edition = "2021"
@@ -13,6 +13,7 @@ bottlerocket-scalar.workspace = true
 bottlerocket-scalar-derive.workspace = true
 bottlerocket-string-impls-for.workspace = true
 bottlerocket-model-derive.workspace = true
+bounded-integer = { workspace = true, features = ["types", "serde1"]}
 base64.workspace = true
 indexmap = { workspace = true, features = ["serde"] }
 lazy_static.workspace = true
