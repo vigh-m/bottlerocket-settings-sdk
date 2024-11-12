@@ -311,12 +311,18 @@ mod test_kubernetes_taint_value {
 
 /// KubernetesClusterName represents a string that contains a valid Kubernetes cluster name.  It
 /// stores the original string and makes it accessible through standard traits.
-// Note: I was unable to find the rules for cluster naming.  We know they have to fit into label
-// values, because of the common cluster-name label, but they also can't be empty.  This combines
-// those two characteristics into a new type, until we find an explicit syntax.
+// Note: this uses the EKS rules for cluster naming.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct KubernetesClusterName {
     inner: String,
+}
+
+lazy_static! {
+    pub(crate) static ref KUBERNETES_CLUSTER_NAME: Regex = Regex::new(
+        // follow EKS cluster name requirements: https://docs.aws.amazon.com/eks/latest/APIReference/API_CreateCluster.html#API_CreateCluster_RequestSyntax
+        r"^[0-9A-Za-z][A-Za-z0-9\-_]{0,99}$"
+    )
+    .unwrap();
 }
 
 impl TryFrom<&str> for KubernetesClusterName {
@@ -331,13 +337,12 @@ impl TryFrom<&str> for KubernetesClusterName {
             }
         );
         ensure!(
-            KubernetesLabelValue::try_from(input).is_ok(),
-            error::InvalidClusterNameSnafu {
-                name: input,
-                msg: "cluster names must be valid Kubernetes label values"
+            KUBERNETES_CLUSTER_NAME.is_match(input),
+            error::BigPatternSnafu {
+                thing: "Kubernetes cluster name",
+                input
             }
         );
-
         Ok(KubernetesClusterName {
             inner: input.to_string(),
         })
@@ -353,14 +358,19 @@ mod test_kubernetes_cluster_name {
 
     #[test]
     fn good_cluster_names() {
-        for ok in &["more-chars_here.now", &"a".repeat(63)] {
+        for ok in &[
+            "more-chars_here-123",
+            "trailing-dash-",
+            "under_score_",
+            &"a".repeat(100),
+        ] {
             KubernetesClusterName::try_from(*ok).unwrap();
         }
     }
 
     #[test]
     fn bad_values() {
-        for err in &["", ".bad", "bad.", &"a".repeat(64)] {
+        for err in &["", "bad.", "-bad", "_bad", "very bad", &"a".repeat(101)] {
             KubernetesClusterName::try_from(*err).unwrap_err();
         }
     }
