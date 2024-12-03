@@ -539,7 +539,7 @@ fn find_inner_field(data_struct: DataStruct, field_name: Option<&str>) -> (Strin
         }
         Fields::Unnamed(unnamed_field) => {
             let field_name = field_name.unwrap_or("0");
-            return (
+            (
                 field_name.to_string(),
                 typename(
                     &unnamed_field
@@ -551,7 +551,7 @@ fn find_inner_field(data_struct: DataStruct, field_name: Option<&str>) -> (Strin
                         )
                         .ty,
                 ),
-            );
+            )
         }
         Fields::Unit => {
             panic!(
