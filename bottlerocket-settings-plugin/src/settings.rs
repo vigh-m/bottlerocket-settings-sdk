@@ -3,12 +3,14 @@ This crate defines the FFI specification for Bottlerocket settings plugins, as w
 functions.
 */
 
-// Avoid empty doc comment warning that originates from the StableAbi derive macro.
-#![allow(clippy::empty_docs)]
 // Avoid false positive improper ctypes warnings for abi_stable's PhantomData markers. We rely on
 // the StableAbi trait to catch any real problems.
-#![allow(improper_ctypes_definitions)]
-
+#![expect(improper_ctypes_definitions)]
+// Avoid warning thrown by StableAbi's definition of non-local `impl`
+#![expect(non_local_definitions)]
+// Avoid `elide the lifetimes` warnings by clippy. The suggested changes do not make the code more
+// readable
+#![expect(clippy::needless_lifetimes)]
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value as JsonValue;
 use std::path::PathBuf;

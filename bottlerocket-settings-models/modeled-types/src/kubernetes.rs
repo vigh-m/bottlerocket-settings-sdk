@@ -669,7 +669,7 @@ mod test_reserved_resources_key {
     }
 }
 
-/// // =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=
+// =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=
 
 /// KubernetesQuantityValue represents a string that contains a valid kubernetes quantity value.
 /// https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
