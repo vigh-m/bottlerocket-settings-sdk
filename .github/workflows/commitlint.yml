@@ -19,10 +19,14 @@ jobs:
       - name: Install dependencies
         run: npm install commitlint @commitlint/config-conventional
       - name: Run commitlint against commits in PR
+        env:
+          WORKSPACE: ${{ github.workspace }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           npx commitlint \
-            -g ${{ github.workspace }}/.commitlint.config.mjs \
-            --from ${{ github.event.pull_request.base.sha }} \
-            --to ${{ github.event.pull_request.head.sha }} \
+            -g "${WORKSPACE}/.commitlint.config.mjs" \
+            --from "${BASE_SHA}" \
+            --to "${HEAD_SHA}" \
             --help-url="https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_BASE_REF}/CONTRIBUTING.md" \
             --verbose
