@@ -30,6 +30,7 @@ impl TryFrom<&str> for ValidBase64 {
     type Error = error::Error;
 
     fn try_from(input: &str) -> Result<Self, Self::Error> {
+        crate::reject_control_chars(input, "ValidBase64")?;
         base64::engine::general_purpose::STANDARD
             .decode(input)
             .context(error::InvalidBase64Snafu)?;
@@ -77,6 +78,7 @@ impl TryFrom<&str> for ValidBase64Json {
     type Error = error::Error;
 
     fn try_from(input: &str) -> Result<Self, Self::Error> {
+        crate::reject_control_chars(input, "ValidBase64Json")?;
         let decoded = base64::engine::general_purpose::STANDARD
             .decode(input)
             .context(error::InvalidBase64Snafu)?;
@@ -132,6 +134,7 @@ impl TryFrom<&str> for SingleLineString {
     type Error = error::Error;
 
     fn try_from(input: &str) -> Result<Self, Self::Error> {
+        crate::reject_control_chars(input, "SingleLineString")?;
         // Rust does not treat all Unicode line terminators as starting a new line, so we check for
         // specific characters here, rather than just counting from lines().
         // https://en.wikipedia.org/wiki/Newline#Unicode
@@ -209,6 +212,7 @@ impl TryFrom<&str> for ValidLinuxHostname {
 
     #[allow(clippy::len_zero)]
     fn try_from(input: &str) -> Result<Self, Self::Error> {
+        crate::reject_control_chars(input, "ValidLinuxHostname")?;
         ensure!(
             VALID_LINUX_HOSTNAME.is_match(input),
             error::InvalidLinuxHostnameSnafu {
@@ -451,6 +455,7 @@ impl TryFrom<&str> for Identifier {
     type Error = error::Error;
 
     fn try_from(input: &str) -> Result<Self, Self::Error> {
+        crate::reject_control_chars(input, "Identifier")?;
         let valid_identifier = input
             .chars()
             .all(|c| (c.is_ascii() && c.is_alphanumeric()) || c == '-')
@@ -508,21 +513,29 @@ impl TryFrom<&str> for Url {
     type Error = error::Error;
 
     fn try_from(input: &str) -> Result<Self, Self::Error> {
-        if input.parse::<url::Url>().is_ok() {
-            return Ok(Url {
-                inner: input.to_string(),
-            });
-        } else {
-            // It's very common to specify URLs without a scheme, so we add one and see if that
-            // fixes parsing.
-            let prefixed = format!("http://{input}");
-            if prefixed.parse::<url::Url>().is_ok() {
+        // `url::Url::parse` silently strips ASCII tab/CR/LF from its input
+        // copy, so a raw newline would validate; reject control chars first.
+        crate::reject_control_chars(input, "Url")?;
+
+        let first_err = match input.parse::<url::Url>() {
+            Ok(_) => {
                 return Ok(Url {
                     inner: input.to_string(),
                 });
             }
+            Err(e) => e,
+        };
+        // Scheme-less inputs like `example.com` are common; retry with `http://`
+        // purely as a validation probe. The stored value is always the original
+        // input so we never rewrite scheme-less refs into scheme-prefixed URLs
+        // (which would break downstream consumers, e.g. host-ctr).
+        let prefixed = format!("http://{input}");
+        if prefixed.parse::<url::Url>().is_ok() {
+            return Ok(Url {
+                inner: input.to_string(),
+            });
         }
-        error::InvalidUrlSnafu { input }.fail()
+        Err(first_err).context(error::InvalidUrlSnafu { input })
     }
 }
 
@@ -558,13 +571,88 @@ mod test_url {
 
     #[test]
     fn bad_urls() {
-        for err in &["how are you", "weird@"] {
+        for err in &["how are you", "weird@", "not a url"] {
             Url::try_from(*err).unwrap_err();
         }
     }
-}
 
-// =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=
+    #[test]
+    fn stores_input_verbatim() {
+        // The stored form must round-trip byte-for-byte. Downstream consumers
+        // (e.g. host-ctr treating the value as an OCI reference) reject any
+        // scheme rewrite such as `example.com` -> `http://example.com/`.
+        let cases = [
+            "https://example.com/path",
+            "https://example.com",
+            "example.com",
+            "example.com/path",
+            "328549459982.dkr.ecr.us-west-2.amazonaws.com/bottlerocket-control:v0.21.5",
+        ];
+        for input in cases {
+            let got =
+                Url::try_from(input).unwrap_or_else(|e| panic!("expected {input:?} to parse: {e}"));
+            let stored: &str = got.as_ref();
+            assert_eq!(stored, input, "Url must not rewrite input");
+        }
+    }
+
+    #[test]
+    fn rejects_control_characters() {
+        let payloads = [
+            "unix:///run/containerd/containerd.sock\nother",
+            "https://example.com/path\n",
+            "https://example.com/path\r\n",
+            "https://example.com/path\t",
+            "https://example.com/path\x00",
+            "https://example.com/path\x1b",
+            "https://example.com/path\x7f",
+        ];
+        for payload in payloads {
+            let err = Url::try_from(payload).unwrap_err();
+            let msg = err.to_string();
+            assert!(
+                msg.contains("control character"),
+                "expected control-char rejection for {payload:?}, got: {msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn accepts_scheme_less_without_rewriting() {
+        // Scheme-less inputs are common (e.g. container image refs). They must
+        // validate, and the stored value must match the input exactly.
+        for input in [
+            "example.com",
+            "example.com/path",
+            ".internal",
+            "328549459982.dkr.ecr.us-west-2.amazonaws.com/bottlerocket-control:v0.21.5",
+        ] {
+            let got =
+                Url::try_from(input).unwrap_or_else(|e| panic!("expected {input:?} to parse: {e}"));
+            let stored: &str = got.as_ref();
+            assert_eq!(stored, input);
+        }
+    }
+
+    #[test]
+    fn deserialize_rejects_control_characters() {
+        let json = r#""https://mirror.example.com/path\n""#;
+        let err = serde_json::from_str::<Url>(json).unwrap_err();
+        assert!(
+            err.to_string().contains("control character"),
+            "expected control-char rejection through serde, got: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_embedded_newline_directive() {
+        let payload = "unix:///run/containerd/containerd.sock\nOtherDirective=/usr/bin/true\n";
+        Url::try_from(payload).unwrap_err();
+
+        let json = serde_json::to_string(payload).unwrap();
+        serde_json::from_str::<Url>(&json).unwrap_err();
+    }
+}
 
 /// FriendlyVersion represents a version string that can optionally be prefixed with 'v'.
 /// It can also be set to 'latest' to represent the latest version. It stores the original string
@@ -578,6 +666,7 @@ impl TryFrom<&str> for FriendlyVersion {
     type Error = error::Error;
 
     fn try_from(input: &str) -> Result<Self, Self::Error> {
+        crate::reject_control_chars(input, "FriendlyVersion")?;
         if input == "latest" {
             return Ok(FriendlyVersion {
                 inner: input.to_string(),
@@ -684,6 +773,7 @@ impl TryFrom<&str> for DNSDomain {
     type Error = error::Error;
 
     fn try_from(input: &str) -> Result<Self, error::Error> {
+        crate::reject_control_chars(input, "DNSDomain")?;
         ensure!(
             !input.starts_with('.'),
             error::InvalidDomainNameSnafu {
@@ -759,6 +849,7 @@ impl TryFrom<&str> for SysctlKey {
     type Error = error::Error;
 
     fn try_from(input: &str) -> Result<Self, error::Error> {
+        crate::reject_control_chars(input, "SysctlKey")?;
         // Basic directory traversal checks; corndog also checks
         ensure!(
             !input.contains(".."),
@@ -864,6 +955,7 @@ impl TryFrom<&str> for BootConfigKey {
     type Error = error::Error;
 
     fn try_from(input: &str) -> Result<Self, error::Error> {
+        crate::reject_control_chars(input, "BootConfigKey")?;
         // Each individual keyword must be valid
         let valid_key = input.split('.').all(|keyword| {
             !keyword.is_empty()
@@ -929,6 +1021,7 @@ impl TryFrom<&str> for BootConfigValue {
     type Error = error::Error;
 
     fn try_from(input: &str) -> Result<Self, error::Error> {
+        crate::reject_control_chars(input, "BootConfigValue")?;
         ensure!(
             input.chars().all(|c| c.is_ascii() && !c.is_ascii_control())
             // Values containing both single quotes and double quotes are inherently invalid since quotes
@@ -986,6 +1079,7 @@ impl TryFrom<&str> for Lockdown {
     type Error = error::Error;
 
     fn try_from(input: &str) -> Result<Self, error::Error> {
+        crate::reject_control_chars(input, "Lockdown")?;
         ensure!(
             matches!(input, "none" | "integrity" | "confidentiality"),
             error::InvalidLockdownSnafu { input }
@@ -1083,6 +1177,7 @@ impl TryFrom<&str> for BootstrapMode {
     type Error = error::Error;
 
     fn try_from(input: &str) -> Result<Self, error::Error> {
+        crate::reject_control_chars(input, "BootstrapMode")?;
         ensure!(
             matches!(input, "off" | "once" | "always"),
             error::InvalidBootstrapModeSnafu { input }
@@ -1226,6 +1321,7 @@ impl TryFrom<&str> for KmodKey {
     type Error = error::Error;
 
     fn try_from(input: &str) -> Result<Self, Self::Error> {
+        crate::reject_control_chars(input, "KmodKey")?;
         // The kernel allows modules to have any name that's a valid filename,
         // but real module names seem to be limited to this character set.
         let valid_key = input
@@ -1327,6 +1423,7 @@ impl TryFrom<&str> for KernelCpuSetValue {
     type Error = error::Error;
 
     fn try_from(input: &str) -> Result<Self, Self::Error> {
+        crate::reject_control_chars(input, "KernelCpuSetValue")?;
         ensure!(
             !input.is_empty(),
             error::InvalidKernelCpuSetValueSnafu { input }
