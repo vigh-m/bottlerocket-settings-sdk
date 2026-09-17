@@ -270,12 +270,14 @@ pub(crate) fn reject_control_chars(input: &str, kind: &'static str) -> Result<()
 }
 
 // Must be after macro definition
+mod drivers;
 mod ecs;
 mod hugepages;
 mod kubernetes;
 mod oci_defaults;
 mod shared;
 
+pub use drivers::*;
 pub use ecs::*;
 pub use hugepages::*;
 pub use kubernetes::*;
